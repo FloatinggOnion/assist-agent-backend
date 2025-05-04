@@ -1,0 +1,12 @@
+*.env
+*.json
+*.log
+*.txt
+*.md
+*.pdf
+*.docx
+faces/
+*.jpeg
+*.jpg
+*.png
+__pycache__/
