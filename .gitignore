@@ -10,3 +10,4 @@ faces/
 *.jpg
 *.png
 __pycache__/
+scenes/
