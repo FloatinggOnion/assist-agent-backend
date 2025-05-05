@@ -6,6 +6,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from face_detection import FaceRecognitionClass
 from ocr_service import OCRService
+from scene_service import SceneService
 
 # Load environment variables
 load_dotenv()
@@ -16,6 +17,7 @@ app = FastAPI(title="Smart Glasses API")
 # Initialize services
 face_recognition = FaceRecognitionClass()
 ocr_service = OCRService()
+scene_service = SceneService()
 
 # Configure Gemini
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -37,6 +39,12 @@ class QueryRequest(BaseModel):
 class SaveFaceRequest(BaseModel):
     image_url: str
     identity: str
+
+class SceneDescriptionRequest(BaseModel):
+    image_url: str
+
+class DailyRecapRequest(BaseModel):
+    date: Optional[str] = None
 
 # Function definitions for Gemini
 functions = [
@@ -85,6 +93,47 @@ functions = [
             },
             "required": ["image_url", "identity"]
         }
+    },
+    {
+        "name": "save_screenshot",
+        "description": "Save a screenshot/scene from the current view. Use this function when someone wants to capture the current scene or take a screenshot.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "type": "string",
+                    "description": "URL of the image to save as a screenshot"
+                }
+            },
+            "required": ["image_url"]
+        }
+    },
+    {
+        "name": "describe_scene",
+        "description": "Describe a single scene from an image. Use this function when someone asks 'what's in this image?' or similar questions about describing a specific scene.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "type": "string",
+                    "description": "URL of the image to describe"
+                }
+            },
+            "required": ["image_url"]
+        }
+    },
+    {
+        "name": "get_daily_recap",
+        "description": "Get a comprehensive description of all scenes from a specific date. Use this function when someone asks 'what happened today?' or 'what happened yesterday?' or similar questions about daily activities.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date to get scenes from (optional, format: YYYYMMDD)"
+                }
+            }
+        }
     }
 ]
 
@@ -108,6 +157,30 @@ async def save_face(request: SaveFaceRequest):
     if not success:
         raise HTTPException(status_code=400, detail="Failed to save face")
     return {"status": "success", "message": f"Face saved as {request.identity}"}
+
+@app.post("/save_screenshot")
+async def save_screenshot(request: ImageRequest):
+    """Save a screenshot from the given image."""
+    result = scene_service.save_screenshot(request.image_url)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+@app.post("/describe_scene")
+async def describe_scene(request: SceneDescriptionRequest):
+    """Describe a single scene from the provided image."""
+    result = scene_service.describe_scene(request.image_url)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+@app.post("/daily_recap")
+async def get_daily_recap(request: DailyRecapRequest):
+    """Get a comprehensive description of all scenes from a specific date."""
+    result = scene_service.get_daily_recap(request.date)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
 
 @app.post("/query")
 async def process_query(request: QueryRequest):
@@ -164,6 +237,30 @@ async def process_query(request: QueryRequest):
                     "status": "success",
                     "message": f"Face saved as {function_call.args['identity']}"
                 }
+            }
+        elif function_call.name == "save_screenshot":
+            result = scene_service.save_screenshot(function_call.args["image_url"])
+            if result["status"] == "error":
+                raise HTTPException(status_code=400, detail=result["message"])
+            return {
+                "function": "save_screenshot",
+                "result": result
+            }
+        elif function_call.name == "describe_scene":
+            result = scene_service.describe_scene(function_call.args["image_url"])
+            if result["status"] == "error":
+                raise HTTPException(status_code=400, detail=result["message"])
+            return {
+                "function": "describe_scene",
+                "result": result
+            }
+        elif function_call.name == "get_daily_recap":
+            result = scene_service.get_daily_recap(function_call.args.get("date"))
+            if result["status"] == "error":
+                raise HTTPException(status_code=400, detail=result["message"])
+            return {
+                "function": "get_daily_recap",
+                "result": result
             }
         else:
             raise HTTPException(status_code=400, detail="Unsupported function")
