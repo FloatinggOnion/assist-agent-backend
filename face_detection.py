@@ -67,7 +67,7 @@ class FaceRecognitionClass:
                 # Get the best match (first result)
                 if len(result) > 0:
                     match = result.iloc[0]  # Get the first row of the DataFrame
-                    identity = os.path.basename(match['identity'])
+                    identity = os.path.basename(match['identity']).split('.')[0]
                     # Convert distance to confidence score (0-100)
                     confidence = float((1 - match['distance']) * 100)
                     matches.append({

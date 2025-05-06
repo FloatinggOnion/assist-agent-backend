@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
+import time
 
 # Load environment variables
 load_dotenv()
@@ -85,23 +86,87 @@ class SceneService:
                     "message": "No scenes found for the specified date"
                 }
             
-            # Create a prompt with all scenes
-            prompt = "Here are several scenes from the same day. Please provide a comprehensive description of what happened throughout the day based on these scenes:\n"
+            # Analyze each scene individually with rate limiting
+            scene_descriptions = []
             for scene in scenes:
-                prompt += f"Scene: {scene}\n"
+                try:
+                    with open(scene, 'rb') as f:
+                        image_data = f.read()
+                        response = self.model.generate_content(
+                            [
+                                "Describe this scene in detail from my own point of view, as they are my experiences. Use pronouns like 'You' and 'Your' instead of 'I' and 'My' or 'The narrator' or 'The author':",
+                                {"mime_type": "image/jpeg", "data": image_data}
+                            ],
+                            generation_config={
+                                "temperature": 0.7,
+                                "top_p": 0.95,
+                                "top_k": 40
+                            }
+                        )
+                        scene_descriptions.append(response.text)
+                    # Add a delay between API calls to avoid rate limits
+                    time.sleep(5)  # Wait 20 seconds between calls
+                except Exception as e:
+                    # If we hit a rate limit, wait longer and retry
+                    if "429" in str(e):
+                        time.sleep(30)  # Wait 30 seconds before retrying
+                        try:
+                            with open(scene, 'rb') as f:
+                                image_data = f.read()
+                                response = self.model.generate_content(
+                                    [
+                                        "Describe this scene in detail:",
+                                        {"mime_type": "image/jpeg", "data": image_data}
+                                    ],
+                                    generation_config={
+                                        "temperature": 0.7,
+                                        "top_p": 0.95,
+                                        "top_k": 40
+                                    }
+                                )
+                                scene_descriptions.append(response.text)
+                        except Exception as retry_e:
+                            return {"status": "error", "message": f"Failed to analyze scene after retry: {str(retry_e)}"}
+                    else:
+                        return {"status": "error", "message": f"Failed to analyze scene: {str(e)}"}
             
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.95,
-                    "top_k": 40
-                }
-            )
+            if not scene_descriptions:
+                return {"status": "error", "message": "Failed to analyze any scenes"}
+            
+            # Combine all scene descriptions and ask for a comprehensive summary
+            combined_prompt = "Here are descriptions of several scenes from the same day. Please provide a comprehensive summary of what happened throughout the day based on these scenes:\n\n"
+            for i, desc in enumerate(scene_descriptions, 1):
+                combined_prompt += f"Scene {i}:\n{desc}\n\n"
+            
+            try:
+                final_response = self.model.generate_content(
+                    combined_prompt,
+                    generation_config={
+                        "temperature": 0.7,
+                        "top_p": 0.95,
+                        "top_k": 40
+                    }
+                )
+            except Exception as e:
+                if "429" in str(e):
+                    time.sleep(30)  # Wait 30 seconds before retrying
+                    try:
+                        final_response = self.model.generate_content(
+                            combined_prompt,
+                            generation_config={
+                                "temperature": 0.7,
+                                "top_p": 0.95,
+                                "top_k": 40
+                            }
+                        )
+                    except Exception as retry_e:
+                        return {"status": "error", "message": f"Failed to generate summary after retry: {str(retry_e)}"}
+                else:
+                    return {"status": "error", "message": f"Failed to generate summary: {str(e)}"}
             
             return {
                 "status": "success",
-                "description": response.text,
+                "description": final_response.text,
                 "source": "daily_recap",
                 "scenes_used": scenes
             }

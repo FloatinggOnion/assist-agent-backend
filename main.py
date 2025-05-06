@@ -138,17 +138,27 @@ functions = [
 ]
 
 # API endpoints
-@app.post("/recognize_face", response_model=FaceResponse)
+@app.post("/recognize_face")
 async def recognize_face(request: ImageRequest):
     """Recognize a face in the given image."""
     matches = face_recognition.find_face(request.image_url)
-    return FaceResponse(matches=matches)
+    if not matches:
+        return {"message": "I don't recognize anyone in this image."}
+    
+    if len(matches) == 1:
+        match = matches[0]
+        return {"message": f"This is most likely {match['identity']} (confidence: {match['confidence']:.1f}%)"}
+    else:
+        names = [f"{match['identity']} ({match['confidence']:.1f}%)" for match in matches]
+        return {"message": f"I see multiple people: {', '.join(names)}"}
 
-@app.post("/extract_text", response_model=OCRResponse)
+@app.post("/extract_text")
 async def extract_text(request: ImageRequest):
     """Extract text from the given image."""
     text_lines = ocr_service.extract_text(request.image_url)
-    return OCRResponse(text_lines=text_lines)
+    if not text_lines:
+        return {"message": "I couldn't find any text in this image."}
+    return {"message": f"I found the following text: {' '.join(text_lines)}"}
 
 @app.post("/save_face")
 async def save_face(request: SaveFaceRequest):
@@ -156,7 +166,7 @@ async def save_face(request: SaveFaceRequest):
     success = face_recognition.add_face(request.image_url, request.identity)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to save face")
-    return {"status": "success", "message": f"Face saved as {request.identity}"}
+    return {"message": f"I've saved {request.identity}'s face to my database."}
 
 @app.post("/save_screenshot")
 async def save_screenshot(request: ImageRequest):
@@ -164,7 +174,7 @@ async def save_screenshot(request: ImageRequest):
     result = scene_service.save_screenshot(request.image_url)
     if result["status"] == "error":
         raise HTTPException(status_code=400, detail=result["message"])
-    return result
+    return {"message": "I've saved this scene to my memory."}
 
 @app.post("/describe_scene")
 async def describe_scene(request: SceneDescriptionRequest):
@@ -172,7 +182,7 @@ async def describe_scene(request: SceneDescriptionRequest):
     result = scene_service.describe_scene(request.image_url)
     if result["status"] == "error":
         raise HTTPException(status_code=400, detail=result["message"])
-    return result
+    return {"message": result["description"]}
 
 @app.post("/daily_recap")
 async def get_daily_recap(request: DailyRecapRequest):
@@ -180,7 +190,7 @@ async def get_daily_recap(request: DailyRecapRequest):
     result = scene_service.get_daily_recap(request.date)
     if result["status"] == "error":
         raise HTTPException(status_code=400, detail=result["message"])
-    return result
+    return {"message": result["description"]}
 
 @app.post("/query")
 async def process_query(request: QueryRequest):
@@ -203,27 +213,18 @@ async def process_query(request: QueryRequest):
         if function_call.name == "recognize_face":
             matches = face_recognition.find_face(function_call.args["image_url"])
             if not matches:
-                return {
-                    "function": "recognize_face",
-                    "result": {"status": "not_found", "message": "No matching faces found in the database"}
-                }
-            return {
-                "function": "recognize_face",
-                "result": {
-                    "status": "success",
-                    "matches": matches,
-                    "message": f"Found {len(matches)} potential matches"
-                }
-            }
+                return {"message": "I don't recognize anyone in this image."}
+            if len(matches) == 1:
+                match = matches[0]
+                return {"message": f"This is most likely {match['identity']} (confidence: {match['confidence']:.1f}%)"}
+            else:
+                names = [f"{match['identity']} ({match['confidence']:.1f}%)" for match in matches]
+                return {"message": f"I see multiple people: {', '.join(names)}"}
         elif function_call.name == "extract_text":
             text_lines = ocr_service.extract_text(function_call.args["image_url"])
-            return {
-                "function": "extract_text",
-                "result": {
-                    "status": "success",
-                    "text": text_lines
-                }
-            }
+            if not text_lines:
+                return {"message": "I couldn't find any text in this image."}
+            return {"message": f"I found the following text: {' '.join(text_lines)}"}
         elif function_call.name == "save_face":
             success = face_recognition.add_face(
                 function_call.args["image_url"],
@@ -231,37 +232,22 @@ async def process_query(request: QueryRequest):
             )
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to save face")
-            return {
-                "function": "save_face",
-                "result": {
-                    "status": "success",
-                    "message": f"Face saved as {function_call.args['identity']}"
-                }
-            }
+            return {"message": f"I've saved {function_call.args['identity']}'s face to my database."}
         elif function_call.name == "save_screenshot":
             result = scene_service.save_screenshot(function_call.args["image_url"])
             if result["status"] == "error":
                 raise HTTPException(status_code=400, detail=result["message"])
-            return {
-                "function": "save_screenshot",
-                "result": result
-            }
+            return {"message": "I've saved this scene to my memory."}
         elif function_call.name == "describe_scene":
             result = scene_service.describe_scene(function_call.args["image_url"])
             if result["status"] == "error":
                 raise HTTPException(status_code=400, detail=result["message"])
-            return {
-                "function": "describe_scene",
-                "result": result
-            }
+            return {"message": result["description"]}
         elif function_call.name == "get_daily_recap":
             result = scene_service.get_daily_recap(function_call.args.get("date"))
             if result["status"] == "error":
                 raise HTTPException(status_code=400, detail=result["message"])
-            return {
-                "function": "get_daily_recap",
-                "result": result
-            }
+            return {"message": result["description"]}
         else:
             raise HTTPException(status_code=400, detail="Unsupported function")
             
